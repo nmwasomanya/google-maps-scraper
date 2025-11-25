@@ -111,23 +111,71 @@ app.post('/api/scrape', async (req: Request, res: Response) => {
           if (acceptButton) await acceptButton.click();
         } catch {}
         
-        // Wait for feed
-        try {
-          await page.waitForSelector('[role="feed"]', { timeout: 10000 });
-        } catch {
+        // Wait for feed - try multiple selectors
+        const resultSelectors = [
+          '[role="feed"]',
+          'div.m6QErb',
+          '.m6QErb[aria-label]',
+          'div[role="main"] a[href*="/maps/place/"]',
+          'a.hfpxzc'
+        ];
+        
+        let resultsFound = false;
+        for (const selector of resultSelectors) {
+          try {
+            await page.waitForSelector(selector, { timeout: 5000 });
+            logger.info(`Found results for "${keyword}" using selector: ${selector}`);
+            resultsFound = true;
+            break;
+          } catch {
+            // Try next selector
+          }
+        }
+        
+        if (!resultsFound) {
           logger.warn(`No results feed found for keyword "${keyword}"`);
           continue;
         }
+        
+        // Add a small delay to ensure results are fully loaded
+        await new Promise(r => setTimeout(r, 1500));
+        
+        // Multiple selectors for the scrollable container
+        const feedSelectors = [
+          '[role="feed"]',
+          'div[role="main"] div[aria-label]',
+          '.m6QErb[aria-label]',
+          '.m6QErb.DxyBCb',
+          'div.m6QErb'
+        ];
         
         // Collect links for this keyword
         const links: Set<string> = new Set();
         let scrollAttempts = 0;
         
         while (links.size < maxResults && scrollAttempts < 30) {
-          const newLinks = await page.$$eval(
+          // Try multiple link selectors
+          const linkSelectors = [
             'a[href*="/maps/place/"]',
-            (elements) => elements.map(el => el.getAttribute('href')).filter(Boolean) as string[]
-          );
+            'a.hfpxzc',
+            'div[role="feed"] a[href*="maps"]',
+            '.Nv2PK a[href]'
+          ];
+          
+          let newLinks: string[] = [];
+          for (const linkSelector of linkSelectors) {
+            try {
+              newLinks = await page.$$eval(
+                linkSelector,
+                (elements) => elements
+                  .map(el => el.getAttribute('href'))
+                  .filter((href): href is string => Boolean(href) && href.includes('/maps/place/'))
+              );
+              if (newLinks.length > 0) break;
+            } catch {
+              // Selector not found, try next
+            }
+          }
           
           const prevSize = links.size;
           newLinks.forEach(link => links.add(link));
@@ -139,10 +187,27 @@ app.post('/api/scrape', async (req: Request, res: Response) => {
             scrollAttempts = 0;
           }
           
-          await page.evaluate(() => {
-            const feed = document.querySelector('[role="feed"]');
-            if (feed) feed.scrollTop += 500;
-          });
+          // Scroll using multiple selectors
+          await page.evaluate((selectors: string[]) => {
+            for (const selector of selectors) {
+              const feed = document.querySelector(selector);
+              if (feed && feed.scrollHeight > feed.clientHeight) {
+                feed.scrollTop += 500;
+                return;
+              }
+            }
+            // Fallback: scroll the first scrollable div within main
+            const mainArea = document.querySelector('div[role="main"]');
+            if (mainArea) {
+              const scrollables = mainArea.querySelectorAll('div');
+              for (const div of scrollables) {
+                if (div.scrollHeight > div.clientHeight) {
+                  div.scrollTop += 500;
+                  return;
+                }
+              }
+            }
+          }, feedSelectors);
           
           await new Promise(r => setTimeout(r, 800));
         }

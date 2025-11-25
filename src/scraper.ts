@@ -37,13 +37,41 @@ export class GoogleMapsScraper {
     // Step 2: Handle consent dialog if present
     await this.handleConsentDialog();
     
-    // Step 3: Wait for results to load
-    try {
-      await this.page.waitForSelector('[role="feed"]', { timeout: 10000 });
-    } catch {
+    // Step 3: Wait for results to load - try multiple selectors
+    const resultSelectors = [
+      '[role="feed"]',
+      'div.m6QErb',
+      '.m6QErb[aria-label]',
+      'div[role="main"] a[href*="/maps/place/"]',
+      'a.hfpxzc'
+    ];
+    
+    let resultsFound = false;
+    for (const selector of resultSelectors) {
+      try {
+        await this.page.waitForSelector(selector, { timeout: 5000 });
+        logger.info(`Found results using selector: ${selector}`);
+        resultsFound = true;
+        break;
+      } catch {
+        // Try next selector
+      }
+    }
+    
+    if (!resultsFound) {
       logger.error('Could not find results feed. The page structure may have changed.');
+      // Take a screenshot for debugging (if possible)
+      try {
+        const screenshot = await this.page.screenshot({ path: 'debug-screenshot.png' });
+        logger.info('Debug screenshot saved to debug-screenshot.png');
+      } catch {
+        // Ignore screenshot errors
+      }
       return results;
     }
+    
+    // Add a small delay to ensure results are fully loaded
+    await randomDelay(1000, 2000);
     
     // Step 4: Scroll to load more results and collect links
     logger.info('Scrolling to collect place links...');
@@ -133,15 +161,52 @@ export class GoogleMapsScraper {
     const maxScrollAttempts = 50;
     const stableCountThreshold = 5; // Number of scroll attempts without new results before stopping
     
-    // Find the scrollable results container
-    const feedSelector = '[role="feed"]';
+    // Multiple selectors for the scrollable results container (handles different Google Maps layouts)
+    const feedSelectors = [
+      '[role="feed"]',
+      'div[role="main"] div[aria-label]',
+      '.m6QErb[aria-label]',
+      '.m6QErb.DxyBCb',
+      'div.m6QErb'
+    ];
+    
+    // Find the actual scrollable container
+    let feedSelector = '[role="feed"]';
+    for (const selector of feedSelectors) {
+      const element = await this.page.$(selector);
+      if (element) {
+        feedSelector = selector;
+        logger.info(`Using feed selector: ${selector}`);
+        break;
+      }
+    }
     
     while (links.size < maxResults && scrollAttempts < maxScrollAttempts) {
-      // Collect current visible place links
-      const newLinks = await this.page.$$eval(
+      // Collect current visible place links - try multiple selectors
+      const linkSelectors = [
         'a[href*="/maps/place/"]',
-        (elements) => elements.map(el => el.getAttribute('href')).filter(Boolean) as string[]
-      );
+        'a.hfpxzc',                    // Common class for place links in Google Maps
+        'div[role="feed"] a[href*="maps"]',
+        '.Nv2PK a[href]'              // Result card link selector
+      ];
+      
+      let newLinks: string[] = [];
+      for (const linkSelector of linkSelectors) {
+        try {
+          newLinks = await this.page.$$eval(
+            linkSelector,
+            (elements) => elements
+              .map(el => el.getAttribute('href'))
+              .filter((href): href is string => Boolean(href) && href.includes('/maps/place/'))
+          );
+          if (newLinks.length > 0) {
+            logger.debug(`Found ${newLinks.length} links with selector: ${linkSelector}`);
+            break;
+          }
+        } catch {
+          // Selector not found, try next
+        }
+      }
       
       newLinks.forEach(link => links.add(link));
       
@@ -160,28 +225,50 @@ export class GoogleMapsScraper {
       
       // Scroll down the feed with random increment for human-like behavior
       const scrollAmount = Math.floor(Math.random() * 200) + 400; // 400-600 pixels
-      await this.page.evaluate(({ selector, amount }: { selector: string; amount: number }) => {
-        const feed = document.querySelector(selector);
-        if (feed) {
-          feed.scrollTop += amount;
+      await this.page.evaluate(({ selectors, amount }: { selectors: string[]; amount: number }) => {
+        // Try multiple selectors to find the scrollable container
+        for (const selector of selectors) {
+          const feed = document.querySelector(selector);
+          if (feed && feed.scrollHeight > feed.clientHeight) {
+            feed.scrollTop += amount;
+            return;
+          }
         }
-      }, { selector: feedSelector, amount: scrollAmount });
+        // Fallback: scroll the first scrollable div within main
+        const mainArea = document.querySelector('div[role="main"]');
+        if (mainArea) {
+          const scrollables = mainArea.querySelectorAll('div');
+          for (const div of scrollables) {
+            if (div.scrollHeight > div.clientHeight) {
+              div.scrollTop += amount;
+              return;
+            }
+          }
+        }
+      }, { selectors: feedSelectors, amount: scrollAmount });
       
       await randomDelay(800, 1500);
       
       // Check for "end of results" indicator (multiple possible texts for different locales)
-      const endOfResults = await this.page.evaluate(() => {
+      const endOfResults = await this.page.evaluate((selectors: string[]) => {
         // Check for common end-of-list indicators in the DOM
-        const indicators = Array.from(document.querySelectorAll('[role="feed"] > div:last-child'));
-        for (const indicator of indicators) {
-          const text = indicator.textContent || '';
-          // Look for patterns that indicate end of results
-          if (text.toLowerCase().includes('end') || text.toLowerCase().includes('no more')) {
-            return true;
+        for (const selector of selectors) {
+          const feed = document.querySelector(selector);
+          if (feed) {
+            const lastChild = feed.querySelector(':scope > div:last-child');
+            if (lastChild) {
+              const text = lastChild.textContent || '';
+              // Look for patterns that indicate end of results
+              if (text.toLowerCase().includes("you've reached the end") || 
+                  text.toLowerCase().includes('no more') ||
+                  text.toLowerCase().includes('end of list')) {
+                return true;
+              }
+            }
           }
         }
         return false;
-      });
+      }, feedSelectors);
       
       if (endOfResults) {
         logger.info('Reached end of results list');
