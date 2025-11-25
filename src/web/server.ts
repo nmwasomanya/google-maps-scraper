@@ -6,6 +6,7 @@ import express, { Request, Response } from 'express';
 import path from 'path';
 import { createBrowser, createContext } from '../browser';
 import { logger } from '../utils/logger';
+import { database, PlaceDataWithKeyword } from '../utils/database';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -13,15 +14,6 @@ const PORT = process.env.PORT || 3000;
 // Middleware
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '../../public')));
-
-// Extended PlaceData with keyword
-interface PlaceDataWithKeyword {
-  name: string;
-  city: string;
-  category: string;
-  website: string;
-  keyword: string;
-}
 
 // Store active scraping sessions
 interface ScrapingSession {
@@ -304,7 +296,7 @@ app.post('/api/scrape', async (req: Request, res: Response) => {
         }
       }
       
-      // Mark completed
+      // Mark completed and save to database
       const finalSession = sessions.get(sessionId);
       if (finalSession) {
         finalSession.status = 'completed';
@@ -312,7 +304,11 @@ app.post('/api/scrape', async (req: Request, res: Response) => {
         finalSession.total = allResults.length;
         finalSession.progress = allResults.length;
         finalSession.endTime = new Date();
+        
+        // Save results to persistent database
+        const addedCount = database.addPlaces(allResults);
         logger.info(`Scraping completed. Total places with websites: ${allResults.length}`);
+        logger.info(`Added ${addedCount} new places to database (${allResults.length - addedCount} duplicates skipped)`);
       }
       
     } catch (error) {
@@ -406,6 +402,67 @@ app.get('/api/download/:sessionId/csv', (req: Request, res: Response) => {
   
   res.setHeader('Content-Type', 'text/csv');
   res.setHeader('Content-Disposition', `attachment; filename=google-maps-results-${Date.now()}.csv`);
+  res.send(csvRows.join('\n'));
+});
+
+// === Database API Endpoints ===
+
+// Get all places from the database
+app.get('/api/database', (req: Request, res: Response) => {
+  const places = database.getAllPlaces();
+  const stats = database.getStats();
+  res.json({ places, stats });
+});
+
+// Get database statistics
+app.get('/api/database/stats', (req: Request, res: Response) => {
+  const stats = database.getStats();
+  res.json(stats);
+});
+
+// Reset (clear) the database
+app.post('/api/database/reset', (req: Request, res: Response) => {
+  database.reset();
+  res.json({ success: true, message: 'Database has been reset' });
+});
+
+// Search places in the database
+app.get('/api/database/search', (req: Request, res: Response) => {
+  const { q } = req.query;
+  if (!q || typeof q !== 'string') {
+    return res.status(400).json({ error: 'Search query is required' });
+  }
+  const results = database.search(q);
+  res.json({ results });
+});
+
+// Download all database data as JSON
+app.get('/api/database/download/json', (req: Request, res: Response) => {
+  const places = database.getAllPlaces();
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Content-Disposition', `attachment; filename=database-export-${Date.now()}.json`);
+  res.send(JSON.stringify(places, null, 2));
+});
+
+// Download all database data as CSV
+app.get('/api/database/download/csv', (req: Request, res: Response) => {
+  const places = database.getAllPlaces();
+  const headers = ['name', 'city', 'category', 'website', 'keyword', 'scrapedAt'];
+  const csvRows = [headers.join(',')];
+  
+  for (const item of places) {
+    const row = headers.map(header => {
+      const value = (item as Record<string, string | undefined>)[header] || '';
+      if (value.includes(',') || value.includes('"')) {
+        return `"${value.replace(/"/g, '""')}"`;
+      }
+      return value;
+    });
+    csvRows.push(row.join(','));
+  }
+  
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', `attachment; filename=database-export-${Date.now()}.csv`);
   res.send(csvRows.join('\n'));
 });
 
