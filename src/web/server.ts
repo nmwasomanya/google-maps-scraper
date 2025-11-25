@@ -48,7 +48,7 @@ function generateSessionId(): string {
 
 // Start a new scraping job with batch keywords
 app.post('/api/scrape', async (req: Request, res: Response) => {
-  const { location, keywords, maxResults = 20, headless = true } = req.body;
+  const { location, keywords, maxResults, headless = true } = req.body;
 
   if (!location || typeof location !== 'string') {
     return res.status(400).json({ error: 'Location is required' });
@@ -59,18 +59,23 @@ app.post('/api/scrape', async (req: Request, res: Response) => {
   }
 
   const sessionId = generateSessionId();
-  const totalPlaces = keywords.length * maxResults;
+  // When maxResults is undefined, we'll update the total as we discover places
+  const estimatedPlaces = maxResults ? keywords.length * maxResults : 0;
   
   sessions.set(sessionId, {
     status: 'running',
     progress: 0,
-    total: totalPlaces,
+    total: estimatedPlaces,
     results: [],
     startTime: new Date(),
     currentKeyword: keywords[0],
     keywordIndex: 1,
     totalKeywords: keywords.length
   });
+
+  logger.info(`Starting scrape session ${sessionId} - maxResults: ${maxResults !== undefined ? maxResults : 'unlimited (crawl all available)'}`);
+  logger.info(`Only places with websites will be recorded`);
+  logger.debug(`Debug log file: ${logger.getLogFilePath()}`);
 
   // Start scraping in background
   (async () => {
@@ -152,8 +157,11 @@ app.post('/api/scrape', async (req: Request, res: Response) => {
         // Collect links for this keyword
         const links: Set<string> = new Set();
         let scrollAttempts = 0;
+        const stableCountThreshold = 10; // Number of scroll attempts without new results before stopping
+        const maxScrollAttempts = 100; // Maximum scroll attempts
         
-        while (links.size < maxResults && scrollAttempts < 30) {
+        // Continue scrolling until we reach maxResults (if set) or find no more results
+        while ((maxResults === undefined || links.size < maxResults) && scrollAttempts < maxScrollAttempts) {
           // Try multiple link selectors
           const linkSelectors = [
             'a[href*="/maps/place/"]',
@@ -182,9 +190,13 @@ app.post('/api/scrape', async (req: Request, res: Response) => {
           
           if (links.size === prevSize) {
             scrollAttempts++;
-            if (scrollAttempts >= 5) break;
+            if (scrollAttempts >= stableCountThreshold) {
+              logger.debug(`No new results after ${stableCountThreshold} scroll attempts for keyword "${keyword}"`);
+              break;
+            }
           } else {
             scrollAttempts = 0;
+            logger.debug(`Found ${links.size} links so far for keyword "${keyword}"`);
           }
           
           // Scroll using multiple selectors
@@ -212,7 +224,9 @@ app.post('/api/scrape', async (req: Request, res: Response) => {
           await new Promise(r => setTimeout(r, 800));
         }
         
-        const placeLinks = Array.from(links).slice(0, maxResults);
+        // Return all links if maxResults is undefined, otherwise slice to maxResults
+        const collectedLinks = Array.from(links);
+        const placeLinks = maxResults !== undefined ? collectedLinks.slice(0, maxResults) : collectedLinks;
         logger.info(`Found ${placeLinks.length} places for keyword "${keyword}"`);
         
         // Update total based on actual links found
@@ -220,14 +234,16 @@ app.post('/api/scrape', async (req: Request, res: Response) => {
         if (currentSession) {
           // Recalculate total based on what we've found
           const remainingKeywords = keywords.length - keywordIdx - 1;
-          currentSession.total = allResults.length + placeLinks.length + (remainingKeywords * maxResults);
+          const estimatedRemaining = maxResults !== undefined ? remainingKeywords * maxResults : remainingKeywords * placeLinks.length;
+          currentSession.total = allResults.length + placeLinks.length + estimatedRemaining;
         }
         
-        // Extract data from each place
+        // Extract data from each place (only record places with websites)
         for (let i = 0; i < placeLinks.length; i++) {
           try {
             const link = placeLinks[i];
             const fullUrl = link.startsWith('http') ? link : `https://www.google.com${link}`;
+            logger.debug(`Processing place ${i + 1}/${placeLinks.length} for keyword "${keyword}": ${fullUrl}`);
             await page.goto(fullUrl, { waitUntil: 'networkidle', timeout: 30000 });
             await page.waitForSelector('h1', { timeout: 10000 });
             
@@ -267,12 +283,18 @@ app.post('/api/scrape', async (req: Request, res: Response) => {
               }
             } catch {}
             
-            allResults.push({ name, city, category, website, keyword });
-            
-            const updateSession = sessions.get(sessionId);
-            if (updateSession) {
-              updateSession.results = [...allResults];
-              updateSession.progress = allResults.length;
+            // Only add places that have a valid website (not 'N/A' or empty)
+            if (website && website !== 'N/A' && website.startsWith('http')) {
+              allResults.push({ name, city, category, website, keyword });
+              logger.debug(`Added place: ${name}, website: ${website}`);
+              
+              const updateSession = sessions.get(sessionId);
+              if (updateSession) {
+                updateSession.results = [...allResults];
+                updateSession.progress = allResults.length;
+              }
+            } else {
+              logger.debug(`Skipped place without website: ${name}`);
             }
             
             await new Promise(r => setTimeout(r, 1000 + Math.random() * 1000));
@@ -290,6 +312,7 @@ app.post('/api/scrape', async (req: Request, res: Response) => {
         finalSession.total = allResults.length;
         finalSession.progress = allResults.length;
         finalSession.endTime = new Date();
+        logger.info(`Scraping completed. Total places with websites: ${allResults.length}`);
       }
       
     } catch (error) {

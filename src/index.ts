@@ -12,15 +12,16 @@ async function main(): Promise<void> {
   // Parse command line arguments or use defaults
   const options: ScraperOptions = {
     query: process.argv[2] || 'restaurants in New York',
-    maxResults: parseInt(process.argv[3]) || 50,
+    maxResults: process.argv[3] ? parseInt(process.argv[3]) : undefined, // undefined = crawl all available
     headless: process.argv[4] !== 'false',
     outputFormat: 'both'
   };
 
   logger.info('Starting Google Maps Scraper...');
   logger.info(`Query: ${options.query}`);
-  logger.info(`Max Results: ${options.maxResults}`);
+  logger.info(`Max Results: ${options.maxResults !== undefined ? options.maxResults : 'unlimited (crawl all available)'}`);
   logger.info(`Headless: ${options.headless}`);
+  logger.info(`Debug log file: ${logger.getLogFilePath()}`);
 
   let browser;
   
