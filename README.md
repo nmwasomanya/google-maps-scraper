@@ -2,6 +2,13 @@
 
 A web scraper that extracts business information from Google Maps using browser automation (Playwright) instead of the paid Google Maps API. Features a modern web UI for easy batch scraping.
 
+## Key Features
+
+- **Unlimited Crawling**: Crawls all available places for a keyword (no max limit by default)
+- **Website-Only Results**: Only records places that have a website
+- **Debug Logging**: Comprehensive logging to file for debugging and troubleshooting
+- **Batch Processing**: Process multiple keywords in a single session
+
 ## Target Data Fields
 
 | Field | Description | Example |
@@ -11,6 +18,8 @@ A web scraper that extracts business information from Google Maps using browser 
 | **category** | Business category/type | "Pizza Restaurant" |
 | **website** | Business website URL | "https://joespizza.com" |
 | **keyword** | Search keyword used (batch mode) | "restaurants" |
+
+> **Note**: Only places with a valid website URL are included in the results.
 
 ## Installation
 
@@ -41,17 +50,22 @@ Then open http://localhost:3000 in your browser.
 **Web UI Features:**
 - Single location input field
 - Batch keyword support (one keyword per line)
+- Optional max results limit (leave empty to crawl all available)
 - Real-time progress tracking
 - Download results as JSON or CSV
 - View results in a table format
+- Only places with websites are recorded
 
 ### Command Line Usage
 
 ```bash
-# Build and run with default settings (restaurants in New York, 50 results)
+# Build and run with default settings (restaurants in New York, crawls all available)
 npm run scrape
 
-# Custom search query with different result count
+# Custom search query (crawls all available places with websites)
+npm run scrape "coffee shops in San Francisco"
+
+# Limit to specific number of results
 npm run scrape "coffee shops in San Francisco" 100
 
 # Run in visible browser mode (for debugging)
@@ -63,6 +77,23 @@ npm run scrape "hotels in Miami" 50 false
 # Run CLI with ts-node (no build step)
 npm run dev
 ```
+
+## Debug Logging
+
+All scraping operations are logged to both the console and a debug log file:
+
+```
+logs/
+├── scraper-debug-2024-01-15T10-30-00-000Z.log
+└── scraper-debug-2024-01-15T11-45-00-000Z.log
+```
+
+The debug log includes:
+- Link collection progress
+- Place processing details
+- Places skipped (no website)
+- Errors and warnings
+- Session timing information
 
 ## Output
 
@@ -108,13 +139,14 @@ google-maps-scraper/
 │   │   └── server.ts         # Web server for UI
 │   ├── utils/
 │   │   ├── delay.ts          # Random delay utilities
-│   │   ├── logger.ts         # Logging utility
+│   │   ├── logger.ts         # Logging utility with file output
 │   │   └── export.ts         # JSON/CSV export functions
 │   └── types/
 │       └── index.ts          # TypeScript interfaces
 ├── public/
 │   └── index.html            # Web UI
 ├── output/                   # Scraped data output directory
+├── logs/                     # Debug log files
 ├── package.json
 ├── tsconfig.json
 ├── .env.example
@@ -127,10 +159,11 @@ google-maps-scraper/
 This scraper uses **browser automation** (Playwright) to:
 1. Navigate to Google Maps search URLs
 2. Handle consent dialogs automatically
-3. Scroll through results to load more listings
+3. Scroll through results to load all available listings (or until max limit)
 4. Visit each place's detail page
 5. Extract structured data from the DOM
-6. Export results to JSON and CSV formats
+6. **Filter**: Only keep places that have a website
+7. Export results to JSON and CSV formats
 
 ## Anti-Detection Features
 

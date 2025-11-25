@@ -21,7 +21,7 @@ export interface BrowserConfig {
  */
 export interface SearchOptions {
   query: string;           // e.g., "restaurants in New York"
-  maxResults?: number;     // Maximum results to scrape (default: 50)
+  maxResults?: number;     // Maximum results to scrape (optional - if not set, crawls all available)
   scrollDelay?: number;    // Delay between scrolls in ms
 }
 

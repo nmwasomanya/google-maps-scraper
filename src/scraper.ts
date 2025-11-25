@@ -21,12 +21,16 @@ export class GoogleMapsScraper {
 
   /**
    * Main search method that orchestrates the scraping workflow
-   * @param options Search options including query and max results
+   * @param options Search options including query (maxResults is optional - if not set, crawls all available)
    */
   async search(options: SearchOptions): Promise<PlaceData[]> {
-    const { query, maxResults = 50 } = options;
+    const { query, maxResults } = options;
     const results: PlaceData[] = [];
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    
+    logger.info(`Starting scrape for query: "${query}"`);
+    logger.info(`Max results: ${maxResults !== undefined ? maxResults : 'unlimited (crawl all available)'}`);
+    logger.debug(`Debug log file: ${logger.getLogFilePath()}`);
     
     // Step 1: Navigate to Google Maps
     const searchUrl = `https://www.google.com/maps/search/${encodeURIComponent(query)}`;
@@ -73,19 +77,28 @@ export class GoogleMapsScraper {
     // Add a small delay to ensure results are fully loaded
     await randomDelay(1000, 2000);
     
-    // Step 4: Scroll to load more results and collect links
+    // Step 4: Scroll to load more results and collect links (no limit if maxResults not specified)
     logger.info('Scrolling to collect place links...');
     const placeLinks = await this.scrollAndCollectLinks(maxResults);
     logger.info(`Found ${placeLinks.length} place links`);
+    logger.debug(`Collected links: ${JSON.stringify(placeLinks.slice(0, 5))}... (showing first 5)`);
     
-    // Step 5: Visit each place and extract data
+    // Step 5: Visit each place and extract data (only record places with websites)
+    logger.info('Extracting place data (only places with websites will be recorded)...');
     for (let i = 0; i < placeLinks.length; i++) {
       const link = placeLinks[i];
       try {
+        logger.debug(`Processing place ${i + 1}/${placeLinks.length}: ${link}`);
         const placeData = await this.extractPlaceData(link);
         if (placeData) {
-          results.push(placeData);
-          logger.progress(i + 1, placeLinks.length, placeData.name);
+          // Only add places that have a valid website (not 'N/A' or empty)
+          if (placeData.website && placeData.website !== 'N/A' && placeData.website.startsWith('http')) {
+            results.push(placeData);
+            logger.progress(results.length, placeLinks.length, `${placeData.name} (has website)`);
+            logger.debug(`Added place: ${placeData.name}, website: ${placeData.website}`);
+          } else {
+            logger.debug(`Skipped place without website: ${placeData.name}`);
+          }
         }
         
         // Save partial results periodically
@@ -152,14 +165,16 @@ export class GoogleMapsScraper {
 
   /**
    * Scrolls the results feed and collects place links
-   * @param maxResults Maximum number of results to collect
+   * @param maxResults Maximum number of results to collect (undefined = collect all available)
    */
-  private async scrollAndCollectLinks(maxResults: number): Promise<string[]> {
+  private async scrollAndCollectLinks(maxResults?: number): Promise<string[]> {
     const links: Set<string> = new Set();
     let previousCount = 0;
     let scrollAttempts = 0;
-    const maxScrollAttempts = 50;
-    const stableCountThreshold = 5; // Number of scroll attempts without new results before stopping
+    const maxScrollAttempts = 100; // Increased for unlimited crawling
+    const stableCountThreshold = 10; // Number of scroll attempts without new results before stopping
+    
+    logger.debug(`Starting link collection - max results: ${maxResults !== undefined ? maxResults : 'unlimited'}`);
     
     // Multiple selectors for the scrollable results container (handles different Google Maps layouts)
     const feedSelectors = [
@@ -181,7 +196,8 @@ export class GoogleMapsScraper {
       }
     }
     
-    while (links.size < maxResults && scrollAttempts < maxScrollAttempts) {
+    // Continue scrolling until we reach maxResults (if set) or find no more results
+    while ((maxResults === undefined || links.size < maxResults) && scrollAttempts < maxScrollAttempts) {
       // Collect current visible place links - try multiple selectors
       const linkSelectors = [
         'a[href*="/maps/place/"]',
@@ -276,7 +292,11 @@ export class GoogleMapsScraper {
       }
     }
     
-    return Array.from(links).slice(0, maxResults);
+    logger.debug(`Finished scrolling. Collected ${links.size} total links`);
+    
+    // Return all links if maxResults is undefined, otherwise slice to maxResults
+    const collectedLinks = Array.from(links);
+    return maxResults !== undefined ? collectedLinks.slice(0, maxResults) : collectedLinks;
   }
 
   /**
