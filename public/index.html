@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Google Maps Scraper</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    header {
+      text-align: center;
+      color: white;
+      margin-bottom: 30px;
+    }
+
+    header h1 {
+      font-size: 2.5rem;
+      margin-bottom: 10px;
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+    }
+
+    header p {
+      font-size: 1.1rem;
+      opacity: 0.9;
+    }
+
+    .card {
+      background: white;
+      border-radius: 16px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+      padding: 30px;
+      margin-bottom: 20px;
+    }
+
+    .card h2 {
+      color: #333;
+      margin-bottom: 20px;
+      font-size: 1.5rem;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .card h2 .icon {
+      font-size: 1.8rem;
+    }
+
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    .form-group label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 600;
+      color: #444;
+    }
+
+    .form-group input, .form-group select, .form-group textarea {
+      width: 100%;
+      padding: 14px 16px;
+      border: 2px solid #e0e0e0;
+      border-radius: 10px;
+      font-size: 1rem;
+      transition: border-color 0.3s, box-shadow 0.3s;
+    }
+
+    .form-group textarea {
+      resize: vertical;
+      font-family: inherit;
+      min-height: 120px;
+    }
+
+    .form-group input:focus, .form-group select:focus, .form-group textarea:focus {
+      outline: none;
+      border-color: #667eea;
+      box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
+    }
+
+    .form-group small {
+      display: block;
+      margin-top: 6px;
+      color: #888;
+      font-size: 0.85rem;
+    }
+
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+
+    @media (max-width: 600px) {
+      .form-row {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 14px 28px;
+      border: none;
+      border-radius: 10px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    .btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 5px 20px rgba(0,0,0,0.2);
+    }
+
+    .btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+
+    .btn-secondary {
+      background: #f0f0f0;
+      color: #333;
+    }
+
+    .btn-success {
+      background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+      color: white;
+    }
+
+    .progress-section {
+      display: none;
+    }
+
+    .progress-section.active {
+      display: block;
+    }
+
+    .progress-bar-container {
+      background: #e0e0e0;
+      border-radius: 10px;
+      height: 24px;
+      overflow: hidden;
+      margin-bottom: 15px;
+    }
+
+    .progress-bar {
+      height: 100%;
+      background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+      border-radius: 10px;
+      transition: width 0.5s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-weight: 600;
+      font-size: 0.85rem;
+    }
+
+    .status-badge {
+      display: inline-block;
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+
+    .status-running {
+      background: #fff3cd;
+      color: #856404;
+    }
+
+    .status-completed {
+      background: #d4edda;
+      color: #155724;
+    }
+
+    .status-error {
+      background: #f8d7da;
+      color: #721c24;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 15px;
+      margin: 20px 0;
+    }
+
+    .stat-item {
+      background: #f8f9fa;
+      padding: 15px;
+      border-radius: 10px;
+      text-align: center;
+    }
+
+    .stat-item .value {
+      font-size: 1.8rem;
+      font-weight: 700;
+      color: #667eea;
+    }
+
+    .stat-item .label {
+      font-size: 0.85rem;
+      color: #666;
+      margin-top: 4px;
+    }
+
+    .results-section {
+      display: none;
+    }
+
+    .results-section.active {
+      display: block;
+    }
+
+    .results-table-container {
+      overflow-x: auto;
+      margin-top: 20px;
+    }
+
+    .results-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.9rem;
+    }
+
+    .results-table th, .results-table td {
+      padding: 12px 15px;
+      text-align: left;
+      border-bottom: 1px solid #e0e0e0;
+    }
+
+    .results-table th {
+      background: #f8f9fa;
+      font-weight: 600;
+      color: #444;
+      position: sticky;
+      top: 0;
+    }
+
+    .results-table tr:hover {
+      background: #f8f9fa;
+    }
+
+    .results-table td a {
+      color: #667eea;
+      text-decoration: none;
+    }
+
+    .results-table td a:hover {
+      text-decoration: underline;
+    }
+
+    .download-buttons {
+      display: flex;
+      gap: 10px;
+      margin-top: 20px;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 40px;
+      color: #888;
+    }
+
+    .empty-state .icon {
+      font-size: 4rem;
+      margin-bottom: 15px;
+    }
+
+    .spinner {
+      display: inline-block;
+      width: 20px;
+      height: 20px;
+      border: 3px solid rgba(255,255,255,0.3);
+      border-radius: 50%;
+      border-top-color: white;
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    footer {
+      text-align: center;
+      color: rgba(255,255,255,0.8);
+      margin-top: 30px;
+      font-size: 0.9rem;
+    }
+
+    footer a {
+      color: white;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🗺️ Google Maps Scraper</h1>
+      <p>Extract business data from Google Maps without the paid API</p>
+    </header>
+
+    <!-- Input Form -->
+    <div class="card">
+      <h2><span class="icon">⚙️</span> Scraper Configuration</h2>
+      <form id="scrapeForm">
+        <div class="form-group">
+          <label for="location">Location</label>
+          <input type="text" id="location" placeholder="e.g., New York, San Francisco, Los Angeles" required>
+          <small>Enter the city or area to search in</small>
+        </div>
+
+        <div class="form-group">
+          <label for="keywords">Search Keywords (one per line)</label>
+          <textarea id="keywords" rows="5" placeholder="restaurants&#10;coffee shops&#10;hotels&#10;gyms&#10;dentists" required></textarea>
+          <small>Enter multiple keywords, one per line. Each keyword will be searched in the specified location.</small>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="maxResults">Results Per Keyword</label>
+            <input type="number" id="maxResults" value="20" min="1" max="200">
+            <small>Max places to scrape per keyword (1-200)</small>
+          </div>
+
+          <div class="form-group">
+            <label for="headless">Browser Mode</label>
+            <select id="headless">
+              <option value="true">Headless (Faster)</option>
+              <option value="false">Visible (Debug)</option>
+            </select>
+            <small>Visible mode shows the browser window</small>
+          </div>
+        </div>
+
+        <button type="submit" class="btn btn-primary" id="startBtn">
+          <span>🚀</span> Start Scraping
+        </button>
+      </form>
+    </div>
+
+    <!-- Progress Section -->
+    <div class="card progress-section" id="progressSection">
+      <h2><span class="icon">📊</span> Scraping Progress</h2>
+      
+      <div class="progress-bar-container">
+        <div class="progress-bar" id="progressBar" style="width: 0%">0%</div>
+      </div>
+
+      <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 15px;">
+        <span class="status-badge" id="statusBadge">Running</span>
+        <span id="progressText">Initializing...</span>
+      </div>
+
+      <div id="currentKeywordBox" style="background: #f0f4ff; padding: 12px 16px; border-radius: 8px; margin-bottom: 15px; display: none;">
+        <strong>Current Keyword:</strong> <span id="currentKeyword">-</span>
+        <span style="margin-left: 15px; color: #666;">(<span id="keywordProgress">0</span> of <span id="keywordTotal">0</span> keywords)</span>
+      </div>
+
+      <div class="stats">
+        <div class="stat-item">
+          <div class="value" id="statProgress">0</div>
+          <div class="label">Places Processed</div>
+        </div>
+        <div class="stat-item">
+          <div class="value" id="statTotal">0</div>
+          <div class="label">Total Places</div>
+        </div>
+        <div class="stat-item">
+          <div class="value" id="statTime">0s</div>
+          <div class="label">Elapsed Time</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Results Section -->
+    <div class="card results-section" id="resultsSection">
+      <h2><span class="icon">📋</span> Results</h2>
+      
+      <div class="download-buttons">
+        <button class="btn btn-success" id="downloadJSON">
+          <span>📥</span> Download JSON
+        </button>
+        <button class="btn btn-success" id="downloadCSV">
+          <span>📥</span> Download CSV
+        </button>
+      </div>
+
+      <div class="results-table-container">
+        <table class="results-table" id="resultsTable">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Name</th>
+              <th>City</th>
+              <th>Category</th>
+              <th>Website</th>
+              <th>Keyword</th>
+            </tr>
+          </thead>
+          <tbody id="resultsBody">
+          </tbody>
+        </table>
+      </div>
+
+      <div class="empty-state" id="emptyState" style="display: none;">
+        <div class="icon">📭</div>
+        <p>No results yet. Start scraping to see data here.</p>
+      </div>
+    </div>
+
+    <footer>
+      <p>⚠️ For educational purposes only. Respect website terms of service.</p>
+    </footer>
+  </div>
+
+  <script>
+    let currentSessionId = null;
+    let pollInterval = null;
+    let startTime = null;
+    let timeInterval = null;
+
+    const form = document.getElementById('scrapeForm');
+    const startBtn = document.getElementById('startBtn');
+    const progressSection = document.getElementById('progressSection');
+    const resultsSection = document.getElementById('resultsSection');
+    const progressBar = document.getElementById('progressBar');
+    const statusBadge = document.getElementById('statusBadge');
+    const progressText = document.getElementById('progressText');
+    const statProgress = document.getElementById('statProgress');
+    const statTotal = document.getElementById('statTotal');
+    const statTime = document.getElementById('statTime');
+    const resultsBody = document.getElementById('resultsBody');
+    const emptyState = document.getElementById('emptyState');
+    const downloadJSON = document.getElementById('downloadJSON');
+    const downloadCSV = document.getElementById('downloadCSV');
+    const currentKeywordBox = document.getElementById('currentKeywordBox');
+    const currentKeywordEl = document.getElementById('currentKeyword');
+    const keywordProgressEl = document.getElementById('keywordProgress');
+    const keywordTotalEl = document.getElementById('keywordTotal');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      const location = document.getElementById('location').value.trim();
+      const keywordsText = document.getElementById('keywords').value.trim();
+      const maxResults = parseInt(document.getElementById('maxResults').value) || 20;
+      const headless = document.getElementById('headless').value === 'true';
+
+      if (!location) {
+        alert('Please enter a location');
+        return;
+      }
+
+      if (!keywordsText) {
+        alert('Please enter at least one keyword');
+        return;
+      }
+
+      // Parse keywords (one per line, filter empty lines)
+      const keywords = keywordsText.split('\n').map(k => k.trim()).filter(k => k.length > 0);
+      
+      if (keywords.length === 0) {
+        alert('Please enter at least one keyword');
+        return;
+      }
+
+      // Reset UI
+      startBtn.disabled = true;
+      startBtn.innerHTML = '<span class="spinner"></span> Starting...';
+      progressSection.classList.add('active');
+      resultsSection.classList.add('active');
+      resultsBody.innerHTML = '';
+      progressBar.style.width = '0%';
+      progressBar.textContent = '0%';
+      currentKeywordBox.style.display = 'block';
+      keywordTotalEl.textContent = keywords.length;
+      
+      try {
+        const response = await fetch('/api/scrape', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ location, keywords, maxResults, headless })
+        });
+
+        const data = await response.json();
+        
+        if (data.error) {
+          throw new Error(data.error);
+        }
+
+        currentSessionId = data.sessionId;
+        startTime = Date.now();
+        
+        // Start polling for progress
+        pollInterval = setInterval(pollProgress, 2000);
+        
+        // Start time counter
+        timeInterval = setInterval(updateTime, 1000);
+        
+        updateStatus('running', 'Scraping in progress...');
+        
+      } catch (error) {
+        alert('Error starting scraper: ' + error.message);
+        startBtn.disabled = false;
+        startBtn.innerHTML = '<span>🚀</span> Start Scraping';
+      }
+    });
+
+    async function pollProgress() {
+      if (!currentSessionId) return;
+
+      try {
+        const response = await fetch(`/api/status/${currentSessionId}`);
+        const data = await response.json();
+
+        if (data.error) {
+          throw new Error(data.error);
+        }
+
+        // Update progress
+        const percent = data.total > 0 ? Math.round((data.progress / data.total) * 100) : 0;
+        progressBar.style.width = `${percent}%`;
+        progressBar.textContent = `${percent}%`;
+        statProgress.textContent = data.progress;
+        statTotal.textContent = data.total;
+
+        // Update keyword progress
+        if (data.currentKeyword) {
+          currentKeywordEl.textContent = data.currentKeyword;
+          keywordProgressEl.textContent = data.keywordIndex || 0;
+        }
+
+        // Update status
+        if (data.status === 'completed') {
+          updateStatus('completed', 'Scraping completed!');
+          clearInterval(pollInterval);
+          clearInterval(timeInterval);
+          startBtn.disabled = false;
+          startBtn.innerHTML = '<span>🚀</span> Start Scraping';
+          
+          // Load final results
+          await loadResults();
+        } else if (data.status === 'error') {
+          updateStatus('error', `Error: ${data.error}`);
+          clearInterval(pollInterval);
+          clearInterval(timeInterval);
+          startBtn.disabled = false;
+          startBtn.innerHTML = '<span>🚀</span> Start Scraping';
+        } else {
+          const keywordInfo = data.currentKeyword ? ` - "${data.currentKeyword}"` : '';
+          updateStatus('running', `Processing ${data.progress} of ${data.total} places${keywordInfo}...`);
+          // Load partial results
+          await loadResults();
+        }
+
+      } catch (error) {
+        console.error('Error polling progress:', error);
+      }
+    }
+
+    async function loadResults() {
+      if (!currentSessionId) return;
+
+      try {
+        const response = await fetch(`/api/results/${currentSessionId}`);
+        const data = await response.json();
+
+        if (data.results && data.results.length > 0) {
+          emptyState.style.display = 'none';
+          resultsBody.innerHTML = data.results.map((item, index) => `
+            <tr>
+              <td>${index + 1}</td>
+              <td>${escapeHtml(item.name)}</td>
+              <td>${escapeHtml(item.city)}</td>
+              <td>${escapeHtml(item.category)}</td>
+              <td>${item.website !== 'N/A' ? `<a href="${escapeHtml(item.website)}" target="_blank">${escapeHtml(item.website)}</a>` : 'N/A'}</td>
+              <td>${escapeHtml(item.keyword || '-')}</td>
+            </tr>
+          `).join('');
+        } else {
+          emptyState.style.display = 'block';
+        }
+      } catch (error) {
+        console.error('Error loading results:', error);
+      }
+    }
+
+    function updateStatus(status, text) {
+      statusBadge.className = `status-badge status-${status}`;
+      statusBadge.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+      progressText.textContent = text;
+    }
+
+    function updateTime() {
+      if (startTime) {
+        const elapsed = Math.floor((Date.now() - startTime) / 1000);
+        const minutes = Math.floor(elapsed / 60);
+        const seconds = elapsed % 60;
+        statTime.textContent = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+      }
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    downloadJSON.addEventListener('click', () => {
+      if (currentSessionId) {
+        window.location.href = `/api/download/${currentSessionId}/json`;
+      }
+    });
+
+    downloadCSV.addEventListener('click', () => {
+      if (currentSessionId) {
+        window.location.href = `/api/download/${currentSessionId}/csv`;
+      }
+    });
+  </script>
+</body>
+</html>

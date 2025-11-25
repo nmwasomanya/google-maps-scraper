@@ -1,6 +1,6 @@
 # Google Maps Scraper
 
-A web scraper that extracts business information from Google Maps using browser automation (Playwright) instead of the paid Google Maps API.
+A web scraper that extracts business information from Google Maps using browser automation (Playwright) instead of the paid Google Maps API. Features a modern web UI for easy batch scraping.
 
 ## Target Data Fields
 
@@ -10,6 +10,7 @@ A web scraper that extracts business information from Google Maps using browser 
 | **city** | City where business is located | "New York" |
 | **category** | Business category/type | "Pizza Restaurant" |
 | **website** | Business website URL | "https://joespizza.com" |
+| **keyword** | Search keyword used (batch mode) | "restaurants" |
 
 ## Installation
 
@@ -23,18 +24,33 @@ npx playwright install chromium
 
 ## Usage
 
-### Basic Usage
+### Web UI (Recommended)
+
+The easiest way to use the scraper is through the web interface:
+
+```bash
+# Start the web server
+npm run web
+
+# Or for development with auto-reload
+npm run web:dev
+```
+
+Then open http://localhost:3000 in your browser.
+
+**Web UI Features:**
+- Single location input field
+- Batch keyword support (one keyword per line)
+- Real-time progress tracking
+- Download results as JSON or CSV
+- View results in a table format
+
+### Command Line Usage
+
 ```bash
 # Build and run with default settings (restaurants in New York, 50 results)
 npm run scrape
 
-# Or run directly after building
-npm run build
-npm start
-```
-
-### Custom Search
-```bash
 # Custom search query with different result count
 npm run scrape "coffee shops in San Francisco" 100
 
@@ -44,7 +60,7 @@ npm run scrape "hotels in Miami" 50 false
 
 ### Development Mode
 ```bash
-# Run with ts-node (no build step)
+# Run CLI with ts-node (no build step)
 npm run dev
 ```
 
@@ -67,15 +83,16 @@ output/
     "name": "Joe's Pizza",
     "city": "New York",
     "category": "Pizza Restaurant",
-    "website": "https://joespizzanyc.com"
+    "website": "https://joespizzanyc.com",
+    "keyword": "restaurants"
   }
 ]
 ```
 
 **CSV:**
 ```csv
-name,city,category,website
-Joe's Pizza,New York,Pizza Restaurant,https://joespizzanyc.com
+name,city,category,website,keyword
+Joe's Pizza,New York,Pizza Restaurant,https://joespizzanyc.com,restaurants
 ```
 
 ## Project Structure
@@ -83,16 +100,20 @@ Joe's Pizza,New York,Pizza Restaurant,https://joespizzanyc.com
 ```
 google-maps-scraper/
 ├── src/
-│   ├── index.ts              # Main entry point
+│   ├── index.ts              # CLI entry point
 │   ├── scraper.ts            # Core scraping logic
 │   ├── browser.ts            # Browser setup and configuration
 │   ├── parser.ts             # Data extraction/parsing functions
+│   ├── web/
+│   │   └── server.ts         # Web server for UI
 │   ├── utils/
 │   │   ├── delay.ts          # Random delay utilities
 │   │   ├── logger.ts         # Logging utility
 │   │   └── export.ts         # JSON/CSV export functions
 │   └── types/
 │       └── index.ts          # TypeScript interfaces
+├── public/
+│   └── index.html            # Web UI
 ├── output/                   # Scraped data output directory
 ├── package.json
 ├── tsconfig.json
