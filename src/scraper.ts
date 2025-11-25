@@ -6,7 +6,7 @@ import { Page } from 'playwright';
 import { randomDelay } from './utils/delay';
 import { logger } from './utils/logger';
 import { savePartialResults } from './utils/export';
-import { parseCityFromAddress, extractActualUrl, cleanText } from './parser';
+import { parseCityFromAddress, extractActualUrl, cleanText, isGoogleUrl } from './parser';
 import { SearchOptions, PlaceData } from './types';
 
 const MAX_RETRIES = 3;
@@ -95,18 +95,30 @@ export class GoogleMapsScraper {
 
   /**
    * Handles Google consent dialog if present
+   * Tries multiple button selectors to handle different consent dialog variations
    */
   private async handleConsentDialog(): Promise<void> {
     try {
-      // Click "Accept all" on Google consent dialog
-      const acceptButton = await this.page.$('button:has-text("Accept all")');
-      if (acceptButton) {
-        await acceptButton.click();
-        await randomDelay(500, 1000);
-        logger.info('Handled consent dialog');
+      // Multiple selectors for consent buttons (handles different locales and variations)
+      const consentSelectors = [
+        'button:has-text("Accept all")',
+        'button:has-text("Accept")',
+        'button:has-text("I agree")',
+        'button[aria-label*="Accept"]',
+        'form[action*="consent"] button'
+      ];
+      
+      for (const selector of consentSelectors) {
+        const acceptButton = await this.page.$(selector);
+        if (acceptButton) {
+          await acceptButton.click();
+          await randomDelay(500, 1000);
+          logger.info('Handled consent dialog');
+          return;
+        }
       }
     } catch {
-      // No consent dialog present
+      // No consent dialog present or unable to handle
     }
   }
 
@@ -119,6 +131,7 @@ export class GoogleMapsScraper {
     let previousCount = 0;
     let scrollAttempts = 0;
     const maxScrollAttempts = 50;
+    const stableCountThreshold = 5; // Number of scroll attempts without new results before stopping
     
     // Find the scrollable results container
     const feedSelector = '[role="feed"]';
@@ -132,9 +145,14 @@ export class GoogleMapsScraper {
       
       newLinks.forEach(link => links.add(link));
       
-      // Check if we've stopped getting new results
+      // Check if we've stopped getting new results (robust end detection)
       if (links.size === previousCount) {
         scrollAttempts++;
+        // If no new results after multiple attempts, we've likely reached the end
+        if (scrollAttempts >= stableCountThreshold) {
+          logger.info('No new results found after multiple scroll attempts - assuming end of list');
+          break;
+        }
       } else {
         scrollAttempts = 0;
         previousCount = links.size;
@@ -151,8 +169,20 @@ export class GoogleMapsScraper {
       
       await randomDelay(800, 1500);
       
-      // Check for "end of results" indicator
-      const endOfResults = await this.page.$('span:has-text("You\'ve reached the end of the list")');
+      // Check for "end of results" indicator (multiple possible texts for different locales)
+      const endOfResults = await this.page.evaluate(() => {
+        // Check for common end-of-list indicators in the DOM
+        const indicators = Array.from(document.querySelectorAll('[role="feed"] > div:last-child'));
+        for (const indicator of indicators) {
+          const text = indicator.textContent || '';
+          // Look for patterns that indicate end of results
+          if (text.toLowerCase().includes('end') || text.toLowerCase().includes('no more')) {
+            return true;
+          }
+        }
+        return false;
+      });
+      
       if (endOfResults) {
         logger.info('Reached end of results list');
         break;
@@ -310,7 +340,8 @@ export class GoogleMapsScraper {
           if (href) {
             // Parse actual URL from Google's redirect URL
             const actualUrl = extractActualUrl(href);
-            if (actualUrl.startsWith('http') && !actualUrl.includes('google.com')) {
+            // Use proper hostname-based check to filter out Google URLs
+            if (actualUrl.startsWith('http') && !isGoogleUrl(actualUrl)) {
               return actualUrl;
             }
           }
@@ -322,7 +353,10 @@ export class GoogleMapsScraper {
       if (websiteButton) {
         const href = await websiteButton.getAttribute('href');
         if (href) {
-          return extractActualUrl(href);
+          const actualUrl = extractActualUrl(href);
+          if (!isGoogleUrl(actualUrl)) {
+            return actualUrl;
+          }
         }
       }
       

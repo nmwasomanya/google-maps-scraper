@@ -8,6 +8,7 @@
 export interface BrowserConfig {
   headless: boolean;
   slowMo?: number;
+  userAgent?: string;
   proxy?: {
     server: string;
     username?: string;

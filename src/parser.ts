@@ -62,3 +62,21 @@ export function isValidWebsite(url: string): boolean {
     return false;
   }
 }
+
+/**
+ * Checks if a URL is a Google domain URL
+ * Uses proper hostname parsing to avoid substring matching vulnerabilities
+ * @param url URL to check
+ * @returns True if URL is a Google domain
+ */
+export function isGoogleUrl(url: string): boolean {
+  if (!url) return false;
+  try {
+    const parsed = new URL(url);
+    const hostname = parsed.hostname.toLowerCase();
+    // Check if hostname is google.com or ends with .google.com
+    return hostname === 'google.com' || hostname.endsWith('.google.com');
+  } catch {
+    return false;
+  }
+}

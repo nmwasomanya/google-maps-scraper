@@ -5,6 +5,9 @@
 import { chromium, Browser, BrowserContext } from 'playwright';
 import { BrowserConfig } from './types';
 
+// Default user agent - update periodically or configure via environment
+const DEFAULT_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36';
+
 /**
  * Creates a new Playwright browser instance with anti-detection configuration
  * @param config Browser configuration options
@@ -37,11 +40,12 @@ export async function createBrowser(config: BrowserConfig): Promise<Browser> {
 /**
  * Creates a browser context with stealth configuration
  * @param browser Browser instance to create context from
+ * @param userAgent Optional custom user agent string
  */
-export async function createContext(browser: Browser): Promise<BrowserContext> {
+export async function createContext(browser: Browser, userAgent?: string): Promise<BrowserContext> {
   const context = await browser.newContext({
     viewport: { width: 1920, height: 1080 },
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    userAgent: userAgent || process.env.USER_AGENT || DEFAULT_USER_AGENT,
     locale: 'en-US',
     timezoneId: 'America/New_York',
     geolocation: { latitude: 40.7128, longitude: -74.0060 },
