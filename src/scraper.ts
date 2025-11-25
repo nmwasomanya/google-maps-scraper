@@ -62,7 +62,7 @@ export class GoogleMapsScraper {
       logger.error('Could not find results feed. The page structure may have changed.');
       // Take a screenshot for debugging (if possible)
       try {
-        const screenshot = await this.page.screenshot({ path: 'debug-screenshot.png' });
+        await this.page.screenshot({ path: 'debug-screenshot.png' });
         logger.info('Debug screenshot saved to debug-screenshot.png');
       } catch {
         // Ignore screenshot errors
