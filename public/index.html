@@ -283,6 +283,18 @@
       margin-top: 20px;
     }
 
+    .database-buttons {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 20px;
+    }
+
+    .btn-danger {
+      background: linear-gradient(135deg, #ff416c 0%, #ff4b2b 100%);
+      color: white;
+    }
+
     .empty-state {
       text-align: center;
       padding: 40px;
@@ -436,6 +448,65 @@
       </div>
     </div>
 
+    <!-- Database Section -->
+    <div class="card" id="databaseSection">
+      <h2><span class="icon">🗄️</span> Database</h2>
+      <p style="color: #666; margin-bottom: 20px;">All scraped places are automatically saved to the database. View, download, or reset stored data.</p>
+      
+      <div class="stats" id="dbStats">
+        <div class="stat-item">
+          <div class="value" id="dbCount">0</div>
+          <div class="label">Total Places</div>
+        </div>
+        <div class="stat-item">
+          <div class="value" id="dbLastUpdated">-</div>
+          <div class="label">Last Updated</div>
+        </div>
+        <div class="stat-item">
+          <div class="value" id="dbTotalScraped">0</div>
+          <div class="label">Total Scraped</div>
+        </div>
+      </div>
+
+      <div class="database-buttons">
+        <button class="btn btn-secondary" id="loadDatabaseBtn">
+          <span>🔄</span> Load Database
+        </button>
+        <button class="btn btn-success" id="downloadDbJSON">
+          <span>📥</span> Download JSON
+        </button>
+        <button class="btn btn-success" id="downloadDbCSV">
+          <span>📥</span> Download CSV
+        </button>
+        <button class="btn btn-danger" id="resetDatabaseBtn">
+          <span>🗑️</span> Reset Database
+        </button>
+      </div>
+
+      <div class="results-table-container" id="dbTableContainer" style="display: none;">
+        <table class="results-table" id="dbTable">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Name</th>
+              <th>City</th>
+              <th>Category</th>
+              <th>Website</th>
+              <th>Keyword</th>
+              <th>Scraped At</th>
+            </tr>
+          </thead>
+          <tbody id="dbBody">
+          </tbody>
+        </table>
+      </div>
+
+      <div class="empty-state" id="dbEmptyState" style="display: none;">
+        <div class="icon">📭</div>
+        <p>Database is empty. Start scraping to populate it.</p>
+      </div>
+    </div>
+
     <footer>
       <p>⚠️ For educational purposes only. Respect website terms of service.</p>
     </footer>
@@ -568,6 +639,9 @@
           
           // Load final results
           await loadResults();
+          
+          // Refresh database stats
+          await loadDatabaseStats();
         } else if (data.status === 'error') {
           updateStatus('error', `Error: ${data.error}`);
           clearInterval(pollInterval);
@@ -645,6 +719,138 @@
         window.location.href = `/api/download/${currentSessionId}/csv`;
       }
     });
+
+    // === Database Functionality ===
+    const loadDatabaseBtn = document.getElementById('loadDatabaseBtn');
+    const downloadDbJSON = document.getElementById('downloadDbJSON');
+    const downloadDbCSV = document.getElementById('downloadDbCSV');
+    const resetDatabaseBtn = document.getElementById('resetDatabaseBtn');
+    const dbCount = document.getElementById('dbCount');
+    const dbLastUpdated = document.getElementById('dbLastUpdated');
+    const dbTotalScraped = document.getElementById('dbTotalScraped');
+    const dbTableContainer = document.getElementById('dbTableContainer');
+    const dbBody = document.getElementById('dbBody');
+    const dbEmptyState = document.getElementById('dbEmptyState');
+
+    // Load database stats on page load
+    async function loadDatabaseStats() {
+      try {
+        const response = await fetch('/api/database/stats');
+        const stats = await response.json();
+        
+        dbCount.textContent = stats.count;
+        dbTotalScraped.textContent = stats.totalScraped;
+        
+        if (stats.lastUpdated) {
+          const date = new Date(stats.lastUpdated);
+          dbLastUpdated.textContent = date.toLocaleDateString();
+        } else {
+          dbLastUpdated.textContent = '-';
+        }
+      } catch (error) {
+        console.error('Error loading database stats:', error);
+      }
+    }
+
+    // Load database data
+    async function loadDatabase() {
+      try {
+        loadDatabaseBtn.disabled = true;
+        loadDatabaseBtn.innerHTML = '<span class="spinner"></span> Loading...';
+        
+        const response = await fetch('/api/database');
+        const data = await response.json();
+        
+        // Update stats
+        dbCount.textContent = data.stats.count;
+        dbTotalScraped.textContent = data.stats.totalScraped;
+        if (data.stats.lastUpdated) {
+          const date = new Date(data.stats.lastUpdated);
+          dbLastUpdated.textContent = date.toLocaleDateString();
+        }
+        
+        if (data.places && data.places.length > 0) {
+          dbEmptyState.style.display = 'none';
+          dbTableContainer.style.display = 'block';
+          dbBody.innerHTML = data.places.map((item, index) => `
+            <tr>
+              <td>${index + 1}</td>
+              <td>${escapeHtml(item.name)}</td>
+              <td>${escapeHtml(item.city)}</td>
+              <td>${escapeHtml(item.category)}</td>
+              <td>${item.website !== 'N/A' ? `<a href="${escapeHtml(item.website)}" target="_blank">${escapeHtml(item.website)}</a>` : 'N/A'}</td>
+              <td>${escapeHtml(item.keyword || '-')}</td>
+              <td>${item.scrapedAt ? new Date(item.scrapedAt).toLocaleString() : '-'}</td>
+            </tr>
+          `).join('');
+        } else {
+          dbTableContainer.style.display = 'none';
+          dbEmptyState.style.display = 'block';
+        }
+      } catch (error) {
+        console.error('Error loading database:', error);
+        alert('Error loading database: ' + error.message);
+      } finally {
+        loadDatabaseBtn.disabled = false;
+        loadDatabaseBtn.innerHTML = '<span>🔄</span> Load Database';
+      }
+    }
+
+    // Reset database
+    async function resetDatabase() {
+      if (!confirm('Are you sure you want to reset the database? This will clear all stored places. This action cannot be undone.')) {
+        return;
+      }
+      
+      try {
+        resetDatabaseBtn.disabled = true;
+        resetDatabaseBtn.innerHTML = '<span class="spinner"></span> Resetting...';
+        
+        const response = await fetch('/api/database/reset', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+          alert('Database has been reset successfully!');
+          // Reload stats and clear table
+          await loadDatabaseStats();
+          dbTableContainer.style.display = 'none';
+          dbEmptyState.style.display = 'block';
+          dbBody.innerHTML = '';
+        } else {
+          throw new Error(data.error || 'Failed to reset database');
+        }
+      } catch (error) {
+        console.error('Error resetting database:', error);
+        alert('Error resetting database: ' + error.message);
+      } finally {
+        resetDatabaseBtn.disabled = false;
+        resetDatabaseBtn.innerHTML = '<span>🗑️</span> Reset Database';
+      }
+    }
+
+    // Event listeners for database buttons
+    loadDatabaseBtn.addEventListener('click', loadDatabase);
+    resetDatabaseBtn.addEventListener('click', resetDatabase);
+    
+    downloadDbJSON.addEventListener('click', () => {
+      window.location.href = '/api/database/download/json';
+    });
+    
+    downloadDbCSV.addEventListener('click', () => {
+      window.location.href = '/api/database/download/csv';
+    });
+
+    // Load database stats on page load
+    loadDatabaseStats();
+
+    // Refresh database stats after scraping completes
+    async function refreshDatabaseAfterScrape() {
+      await loadDatabaseStats();
+    }
   </script>
 </body>
 </html>
