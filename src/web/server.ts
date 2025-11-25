@@ -1,0 +1,339 @@
+/**
+ * Web server for Google Maps Scraper UI
+ */
+
+import express, { Request, Response } from 'express';
+import path from 'path';
+import { createBrowser, createContext } from '../browser';
+import { logger } from '../utils/logger';
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// Middleware
+app.use(express.json());
+app.use(express.static(path.join(__dirname, '../../public')));
+
+// Extended PlaceData with keyword
+interface PlaceDataWithKeyword {
+  name: string;
+  city: string;
+  category: string;
+  website: string;
+  keyword: string;
+}
+
+// Store active scraping sessions
+interface ScrapingSession {
+  status: 'idle' | 'running' | 'completed' | 'error';
+  progress: number;
+  total: number;
+  results: PlaceDataWithKeyword[];
+  error?: string;
+  startTime?: Date;
+  endTime?: Date;
+  currentKeyword?: string;
+  keywordIndex?: number;
+  totalKeywords?: number;
+}
+
+const sessions: Map<string, ScrapingSession> = new Map();
+
+// Generate unique session ID
+function generateSessionId(): string {
+  return `session_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
+}
+
+// API Routes
+
+// Start a new scraping job with batch keywords
+app.post('/api/scrape', async (req: Request, res: Response) => {
+  const { location, keywords, maxResults = 20, headless = true } = req.body;
+
+  if (!location || typeof location !== 'string') {
+    return res.status(400).json({ error: 'Location is required' });
+  }
+
+  if (!keywords || !Array.isArray(keywords) || keywords.length === 0) {
+    return res.status(400).json({ error: 'At least one keyword is required' });
+  }
+
+  const sessionId = generateSessionId();
+  const totalPlaces = keywords.length * maxResults;
+  
+  sessions.set(sessionId, {
+    status: 'running',
+    progress: 0,
+    total: totalPlaces,
+    results: [],
+    startTime: new Date(),
+    currentKeyword: keywords[0],
+    keywordIndex: 1,
+    totalKeywords: keywords.length
+  });
+
+  // Start scraping in background
+  (async () => {
+    let browser;
+    try {
+      browser = await createBrowser({ headless });
+      const context = await createContext(browser);
+      const page = await context.newPage();
+      
+      const allResults: PlaceDataWithKeyword[] = [];
+      
+      // Process each keyword
+      for (let keywordIdx = 0; keywordIdx < keywords.length; keywordIdx++) {
+        const keyword = keywords[keywordIdx];
+        const query = `${keyword} in ${location}`;
+        
+        // Update current keyword in session
+        const session = sessions.get(sessionId);
+        if (session) {
+          session.currentKeyword = keyword;
+          session.keywordIndex = keywordIdx + 1;
+        }
+        
+        logger.info(`Processing keyword ${keywordIdx + 1}/${keywords.length}: "${keyword}"`);
+        
+        // Navigate to search
+        const searchUrl = `https://www.google.com/maps/search/${encodeURIComponent(query)}`;
+        try {
+          await page.goto(searchUrl, { waitUntil: 'networkidle', timeout: 30000 });
+        } catch (e) {
+          logger.error(`Failed to navigate for keyword "${keyword}": ${e}`);
+          continue;
+        }
+        
+        // Handle consent dialog
+        try {
+          const acceptButton = await page.$('button:has-text("Accept all")');
+          if (acceptButton) await acceptButton.click();
+        } catch {}
+        
+        // Wait for feed
+        try {
+          await page.waitForSelector('[role="feed"]', { timeout: 10000 });
+        } catch {
+          logger.warn(`No results feed found for keyword "${keyword}"`);
+          continue;
+        }
+        
+        // Collect links for this keyword
+        const links: Set<string> = new Set();
+        let scrollAttempts = 0;
+        
+        while (links.size < maxResults && scrollAttempts < 30) {
+          const newLinks = await page.$$eval(
+            'a[href*="/maps/place/"]',
+            (elements) => elements.map(el => el.getAttribute('href')).filter(Boolean) as string[]
+          );
+          
+          const prevSize = links.size;
+          newLinks.forEach(link => links.add(link));
+          
+          if (links.size === prevSize) {
+            scrollAttempts++;
+            if (scrollAttempts >= 5) break;
+          } else {
+            scrollAttempts = 0;
+          }
+          
+          await page.evaluate(() => {
+            const feed = document.querySelector('[role="feed"]');
+            if (feed) feed.scrollTop += 500;
+          });
+          
+          await new Promise(r => setTimeout(r, 800));
+        }
+        
+        const placeLinks = Array.from(links).slice(0, maxResults);
+        logger.info(`Found ${placeLinks.length} places for keyword "${keyword}"`);
+        
+        // Update total based on actual links found
+        const currentSession = sessions.get(sessionId);
+        if (currentSession) {
+          // Recalculate total based on what we've found
+          const remainingKeywords = keywords.length - keywordIdx - 1;
+          currentSession.total = allResults.length + placeLinks.length + (remainingKeywords * maxResults);
+        }
+        
+        // Extract data from each place
+        for (let i = 0; i < placeLinks.length; i++) {
+          try {
+            const link = placeLinks[i];
+            const fullUrl = link.startsWith('http') ? link : `https://www.google.com${link}`;
+            await page.goto(fullUrl, { waitUntil: 'networkidle', timeout: 30000 });
+            await page.waitForSelector('h1', { timeout: 10000 });
+            
+            const name = await page.$eval('h1', el => el.textContent?.trim() || 'N/A').catch(() => 'N/A');
+            
+            let category = 'N/A';
+            try {
+              const catElement = await page.$('button[jsaction*="category"]');
+              if (catElement) {
+                category = await catElement.textContent() || 'N/A';
+              }
+            } catch {}
+            
+            let city = 'N/A';
+            try {
+              const addrElement = await page.$('[data-item-id="address"]');
+              if (addrElement) {
+                const addr = await addrElement.textContent() || '';
+                const parts = addr.split(',');
+                if (parts.length >= 2) {
+                  city = parts[parts.length - 2].replace(/\d+/g, '').trim();
+                }
+              }
+            } catch {}
+            
+            let website = 'N/A';
+            try {
+              const webElement = await page.$('a[data-item-id="authority"]');
+              if (webElement) {
+                const href = await webElement.getAttribute('href');
+                if (href && href.includes('url?q=')) {
+                  const match = href.match(/url\?q=([^&]+)/);
+                  if (match) website = decodeURIComponent(match[1]);
+                } else if (href && href.startsWith('http')) {
+                  website = href;
+                }
+              }
+            } catch {}
+            
+            allResults.push({ name, city, category, website, keyword });
+            
+            const updateSession = sessions.get(sessionId);
+            if (updateSession) {
+              updateSession.results = [...allResults];
+              updateSession.progress = allResults.length;
+            }
+            
+            await new Promise(r => setTimeout(r, 1000 + Math.random() * 1000));
+          } catch (err) {
+            logger.error(`Error extracting place for keyword "${keyword}": ${err}`);
+          }
+        }
+      }
+      
+      // Mark completed
+      const finalSession = sessions.get(sessionId);
+      if (finalSession) {
+        finalSession.status = 'completed';
+        finalSession.results = allResults;
+        finalSession.total = allResults.length;
+        finalSession.progress = allResults.length;
+        finalSession.endTime = new Date();
+      }
+      
+    } catch (error) {
+      const session = sessions.get(sessionId);
+      if (session) {
+        session.status = 'error';
+        session.error = error instanceof Error ? error.message : 'Unknown error';
+        session.endTime = new Date();
+      }
+    } finally {
+      if (browser) {
+        await browser.close();
+      }
+    }
+  })();
+
+  res.json({ sessionId, message: 'Scraping started' });
+});
+
+// Get scraping status
+app.get('/api/status/:sessionId', (req: Request, res: Response) => {
+  const { sessionId } = req.params;
+  const session = sessions.get(sessionId);
+  
+  if (!session) {
+    return res.status(404).json({ error: 'Session not found' });
+  }
+  
+  res.json({
+    status: session.status,
+    progress: session.progress,
+    total: session.total,
+    resultsCount: session.results.length,
+    error: session.error,
+    startTime: session.startTime,
+    endTime: session.endTime,
+    currentKeyword: session.currentKeyword,
+    keywordIndex: session.keywordIndex,
+    totalKeywords: session.totalKeywords
+  });
+});
+
+// Get results
+app.get('/api/results/:sessionId', (req: Request, res: Response) => {
+  const { sessionId } = req.params;
+  const session = sessions.get(sessionId);
+  
+  if (!session) {
+    return res.status(404).json({ error: 'Session not found' });
+  }
+  
+  res.json({ results: session.results });
+});
+
+// Download results as JSON
+app.get('/api/download/:sessionId/json', (req: Request, res: Response) => {
+  const { sessionId } = req.params;
+  const session = sessions.get(sessionId);
+  
+  if (!session) {
+    return res.status(404).json({ error: 'Session not found' });
+  }
+  
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Content-Disposition', `attachment; filename=google-maps-results-${Date.now()}.json`);
+  res.send(JSON.stringify(session.results, null, 2));
+});
+
+// Download results as CSV
+app.get('/api/download/:sessionId/csv', (req: Request, res: Response) => {
+  const { sessionId } = req.params;
+  const session = sessions.get(sessionId);
+  
+  if (!session) {
+    return res.status(404).json({ error: 'Session not found' });
+  }
+  
+  const headers = ['name', 'city', 'category', 'website', 'keyword'];
+  const csvRows = [headers.join(',')];
+  
+  for (const item of session.results) {
+    const row = headers.map(header => {
+      const value = item[header as keyof PlaceDataWithKeyword] || '';
+      if (value.includes(',') || value.includes('"')) {
+        return `"${value.replace(/"/g, '""')}"`;
+      }
+      return value;
+    });
+    csvRows.push(row.join(','));
+  }
+  
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', `attachment; filename=google-maps-results-${Date.now()}.csv`);
+  res.send(csvRows.join('\n'));
+});
+
+// Serve the main UI
+app.get('/', (req: Request, res: Response) => {
+  res.sendFile(path.join(__dirname, '../../public/index.html'));
+});
+
+// Start server
+export function startServer(): void {
+  app.listen(PORT, () => {
+    logger.info(`Google Maps Scraper UI running at http://localhost:${PORT}`);
+  });
+}
+
+// Run if called directly
+if (require.main === module) {
+  startServer();
+}
