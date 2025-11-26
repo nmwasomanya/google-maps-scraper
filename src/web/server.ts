@@ -4,9 +4,10 @@
 
 import express, { Request, Response } from 'express';
 import path from 'path';
-import { createBrowser, createContext } from '../browser';
+import { createBrowser, createContext, setupPageOptimizations } from '../browser';
 import { logger } from '../utils/logger';
 import { database, PlaceDataWithKeyword } from '../utils/database';
+import { navigateToUrl } from '../utils/navigation';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -77,6 +78,9 @@ app.post('/api/scrape', async (req: Request, res: Response) => {
       const context = await createContext(browser);
       const page = await context.newPage();
       
+      // Set up page optimizations (resource blocking)
+      await setupPageOptimizations(page);
+      
       const allResults: PlaceDataWithKeyword[] = [];
       
       // Process each keyword
@@ -93,12 +97,11 @@ app.post('/api/scrape', async (req: Request, res: Response) => {
         
         logger.info(`Processing keyword ${keywordIdx + 1}/${keywords.length}: "${keyword}"`);
         
-        // Navigate to search
+        // Navigate to search using the navigation utility
         const searchUrl = `https://www.google.com/maps/search/${encodeURIComponent(query)}`;
-        try {
-          await page.goto(searchUrl, { waitUntil: 'networkidle', timeout: 30000 });
-        } catch (e) {
-          logger.error(`Failed to navigate for keyword "${keyword}": ${e}`);
+        const navigationSuccess = await navigateToUrl(page, searchUrl);
+        if (!navigationSuccess) {
+          logger.error(`Failed to navigate for keyword "${keyword}"`);
           continue;
         }
         
@@ -236,8 +239,12 @@ app.post('/api/scrape', async (req: Request, res: Response) => {
             const link = placeLinks[i];
             const fullUrl = link.startsWith('http') ? link : `https://www.google.com${link}`;
             logger.debug(`Processing place ${i + 1}/${placeLinks.length} for keyword "${keyword}": ${fullUrl}`);
-            await page.goto(fullUrl, { waitUntil: 'networkidle', timeout: 30000 });
-            await page.waitForSelector('h1', { timeout: 10000 });
+            
+            const placeNavigationSuccess = await navigateToUrl(page, fullUrl, { isPlaceDetailPage: true });
+            if (!placeNavigationSuccess) {
+              logger.error(`Failed to navigate to place: ${fullUrl}`);
+              continue;
+            }
             
             const name = await page.$eval('h1', el => el.textContent?.trim() || 'N/A').catch(() => 'N/A');
             

@@ -2,7 +2,7 @@
  * Browser setup and configuration with anti-detection measures
  */
 
-import { chromium, Browser, BrowserContext } from 'playwright';
+import { chromium, Browser, BrowserContext, Page } from 'playwright';
 import { BrowserConfig } from './types';
 
 // Default user agent - update periodically or configure via environment
@@ -71,4 +71,28 @@ export async function createContext(browser: Browser, userAgent?: string): Promi
   });
   
   return context;
+}
+
+/**
+ * Sets up page optimizations including resource blocking to speed up loading
+ * @param page Page instance to optimize
+ */
+export async function setupPageOptimizations(page: Page): Promise<void> {
+  await page.route('**/*', (route) => {
+    const resourceType = route.request().resourceType();
+    
+    // Block heavy resources to speed up loading
+    if (['image', 'font', 'media'].includes(resourceType)) {
+      route.abort();
+    } else if (resourceType === 'stylesheet') {
+      // Allow stylesheets from google.com (needed for proper rendering)
+      if (route.request().url().includes('google.com')) {
+        route.continue();
+      } else {
+        route.abort();
+      }
+    } else {
+      route.continue();
+    }
+  });
 }
