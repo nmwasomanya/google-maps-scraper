@@ -8,8 +8,9 @@ import { logger } from './utils/logger';
 import { savePartialResults } from './utils/export';
 import { parseCityFromAddress, extractActualUrl, cleanText, isGoogleUrl } from './parser';
 import { SearchOptions, PlaceData } from './types';
+import { navigateToUrl } from './utils/navigation';
+import { setupPageOptimizations } from './browser';
 
-const MAX_RETRIES = 3;
 const PARTIAL_SAVE_INTERVAL = 10;
 
 export class GoogleMapsScraper {
@@ -32,11 +33,18 @@ export class GoogleMapsScraper {
     logger.info(`Max results: ${maxResults !== undefined ? maxResults : 'unlimited (crawl all available)'}`);
     logger.debug(`Debug log file: ${logger.getLogFilePath()}`);
     
+    // Set up page optimizations (resource blocking)
+    await setupPageOptimizations(this.page);
+    
     // Step 1: Navigate to Google Maps
     const searchUrl = `https://www.google.com/maps/search/${encodeURIComponent(query)}`;
     logger.info(`Navigating to: ${searchUrl}`);
     
-    await this.navigateWithRetry(searchUrl);
+    const navigationSuccess = await navigateToUrl(this.page, searchUrl);
+    if (!navigationSuccess) {
+      logger.error(`Failed to navigate to search URL: ${searchUrl}`);
+      return results;
+    }
     
     // Step 2: Handle consent dialog if present
     await this.handleConsentDialog();
@@ -113,25 +121,6 @@ export class GoogleMapsScraper {
     }
     
     return results;
-  }
-
-  /**
-   * Navigates to a URL with retry logic
-   * @param url URL to navigate to
-   */
-  private async navigateWithRetry(url: string): Promise<void> {
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-      try {
-        await this.page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
-        return;
-      } catch (error) {
-        logger.warn(`Navigation attempt ${attempt}/${MAX_RETRIES} failed`);
-        if (attempt === MAX_RETRIES) {
-          throw error;
-        }
-        await randomDelay(2000, 5000);
-      }
-    }
   }
 
   /**
@@ -308,18 +297,11 @@ export class GoogleMapsScraper {
       // Navigate to place details page
       const fullUrl = placeUrl.startsWith('http') ? placeUrl : `https://www.google.com${placeUrl}`;
       
-      for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-        try {
-          await this.page.goto(fullUrl, { waitUntil: 'networkidle', timeout: 30000 });
-          break;
-        } catch (error) {
-          if (attempt === MAX_RETRIES) throw error;
-          await randomDelay(1000, 2000);
-        }
+      const navigationSuccess = await navigateToUrl(this.page, fullUrl, { isPlaceDetailPage: true });
+      if (!navigationSuccess) {
+        logger.error(`Failed to navigate to place URL: ${fullUrl}`);
+        return null;
       }
-      
-      // Wait for place details to load
-      await this.page.waitForSelector('h1', { timeout: 10000 });
       
       // Extract all data fields
       const name = await this.extractName();
