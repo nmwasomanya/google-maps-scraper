@@ -169,7 +169,7 @@ app.post('/api/scrape', async (req: Request, res: Response) => {
                 linkSelector,
                 (elements) => elements
                   .map(el => el.getAttribute('href'))
-                  .filter((href): href is string => Boolean(href) && href.includes('/maps/place/'))
+                  .filter((href): href is string => href !== null && href.includes('/maps/place/'))
               );
               if (newLinks.length > 0) break;
             } catch {
@@ -203,7 +203,7 @@ app.post('/api/scrape', async (req: Request, res: Response) => {
             // Fallback: scroll the first scrollable div within main
             const mainArea = document.querySelector('div[role="main"]');
             if (mainArea) {
-              const scrollables = mainArea.querySelectorAll('div');
+              const scrollables = Array.from(mainArea.querySelectorAll('div'));
               for (const div of scrollables) {
                 if (div.scrollHeight > div.clientHeight) {
                   div.scrollTop += 500;
@@ -452,7 +452,7 @@ app.get('/api/database/download/csv', (req: Request, res: Response) => {
   
   for (const item of places) {
     const row = headers.map(header => {
-      const value = (item as Record<string, string | undefined>)[header] || '';
+      const value = item[header as keyof PlaceDataWithKeyword] || '';
       if (value.includes(',') || value.includes('"')) {
         return `"${value.replace(/"/g, '""')}"`;
       }

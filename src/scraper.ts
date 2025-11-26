@@ -213,7 +213,7 @@ export class GoogleMapsScraper {
             linkSelector,
             (elements) => elements
               .map(el => el.getAttribute('href'))
-              .filter((href): href is string => Boolean(href) && href.includes('/maps/place/'))
+              .filter((href): href is string => href !== null && href.includes('/maps/place/'))
           );
           if (newLinks.length > 0) {
             logger.debug(`Found ${newLinks.length} links with selector: ${linkSelector}`);
@@ -253,7 +253,7 @@ export class GoogleMapsScraper {
         // Fallback: scroll the first scrollable div within main
         const mainArea = document.querySelector('div[role="main"]');
         if (mainArea) {
-          const scrollables = mainArea.querySelectorAll('div');
+          const scrollables = Array.from(mainArea.querySelectorAll('div'));
           for (const div of scrollables) {
             if (div.scrollHeight > div.clientHeight) {
               div.scrollTop += amount;
